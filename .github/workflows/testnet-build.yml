@@ -56,7 +56,10 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build cocoon-all
-        run: cmake --build build -j"$(nproc)" --target cocoon-all
+        run: cmake --build build -j"$(nproc)" --target cocoon-all test-validate-request
+
+      - name: Test request validation (function calling, structured output)
+        run: ./build/test-validate-request
 
       - name: Fetch TON testnet config
         run: ./scripts/fetch-testnet-ton-config
