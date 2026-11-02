@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdlib>
 #include "Ed25519.h"
 #include "auto/tl/cocoon_api.h"
 #include "auto/tl/tonlib_api.h"
@@ -374,24 +373,11 @@ class BaseRunner : public td::actor::Actor {
   }
 
  public:
-  // Node wallet thresholds. Defaults suit mainnet; test networks with faucet-limited coins can lower them via
-  // COCOON_MIN_WALLET_BALANCE_NANO / COCOON_WARNING_WALLET_BALANCE_NANO.
-  static td::int64 min_wallet_balance() {
-    static const td::int64 value = env_nano("COCOON_MIN_WALLET_BALANCE_NANO", to_nano(2.1));
-    return value;
+  static constexpr td::int64 min_wallet_balance() {
+    return to_nano(2.1);
   }
-  static td::int64 warning_wallet_balance() {
-    static const td::int64 value = env_nano("COCOON_WARNING_WALLET_BALANCE_NANO", to_nano(5.0));
-    return value;
-  }
-  static td::int64 env_nano(const char *name, td::int64 fallback) {
-    const char *v = std::getenv(name);
-    if (!v || !*v) {
-      return fallback;
-    }
-    char *end = nullptr;
-    long long parsed = std::strtoll(v, &end, 10);
-    return (end && *end == '\0' && parsed > 0) ? static_cast<td::int64>(parsed) : fallback;
+  static constexpr td::int64 warning_wallet_balance() {
+    return to_nano(5.0);
   }
   static td::int32 get_tl_magic(td::Slice buf) {
     if (buf.size() < 4) {

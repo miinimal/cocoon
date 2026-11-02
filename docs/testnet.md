@@ -57,12 +57,6 @@ Without the `COCOON_LOCAL_*_WALLET_KEY` overrides the public test keys from the 
 whichever wallets you use with test GRAM. The proxy address registered in your root contract must
 point at this machine (ports 11001/11002).
 
-## Node wallet thresholds
-
-Every runner waits until its node wallet holds at least 2.1 coins (warning below 5.0). On testnet, where
-coins come from a faucet, lower these with `COCOON_MIN_WALLET_BALANCE_NANO` and
-`COCOON_WARNING_WALLET_BALANCE_NANO` (values in nano units, e.g. `80000000` = 0.08). Defaults are unchanged.
-
 ## 3. Root contract
 
 The mainnet root contract address is the default and does not exist on testnet. Deploy your own root
