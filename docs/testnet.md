@@ -69,7 +69,7 @@ wallet addresses).
 ## 4. Prebuilt binaries
 
 The `testnet-build` workflow builds `cocoon-all` on a GitHub-hosted runner, validates the testnet
-launcher path and publishes the binaries as a prerelease. This is useful for machines without enough
+launcher path and publishes portable (x86-64-v2) binaries as a prerelease. This is useful for machines without enough
 memory to compile TON.
 
 ## Notes
