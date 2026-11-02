@@ -7,6 +7,12 @@ Telegram's official testnet root contract is not deployed on TON testnet, so thi
 root contract with mainnet-like parameters. Maintained by [MINIMALCULT](https://github.com/miinimal);
 not affiliated with or endorsed by Telegram. COCOON is Telegram's project, licensed under Apache-2.0.
 
+## Status
+
+Root contract deployed and proxy #1 registered. The node (proxy, worker, client) is synced and is being
+funded with test GRAM; client connections open once proxy #1 reports online. Live state:
+[Cocoon Explorer — Testnet](https://miinimal.github.io/cocoon-explorer/).
+
 ## Network
 
 | | |
@@ -50,6 +56,6 @@ Or run a whole node (proxy + worker + client) yourself with `docker/testnet-node
 
 Details: [docs/testnet.md](docs/testnet.md).
 
-## Status
+## Notes
 
 Testnet only. Test GRAM has no value.

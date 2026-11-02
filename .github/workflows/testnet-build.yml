@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
   push:
     branches: [testnet]
+    paths-ignore: ["**.md", "docs/**"]
 
 permissions:
   contents: write
