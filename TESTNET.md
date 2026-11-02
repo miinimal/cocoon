@@ -9,8 +9,11 @@ not affiliated with or endorsed by Telegram. COCOON is Telegram's project, licen
 
 ## Status
 
-Root contract deployed and proxy #1 registered. The node (proxy, worker, client) is synced and is being
-funded with test GRAM; client connections open once proxy #1 reports online. Live state:
+Root contract deployed and proxy #1 registered; proxy #1 has deployed its contract with stake and its ports
+11001/11002 are reachable from the internet. All node components (proxy, worker, client, key manager, router)
+run and are synced with TON testnet; the worker, client and key manager wallets are being funded with test GRAM
+(each needs at least 2 GRAM, a limit of the wallet contract). Every build of the `testnet` branch now passes an
+end-to-end request (client, router, proxy, worker, backend, with token accounting) on a CI runner. Live state:
 [Cocoon Explorer — Testnet](https://miinimal.github.io/cocoon-explorer/).
 
 ## Network

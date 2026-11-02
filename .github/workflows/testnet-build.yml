@@ -69,7 +69,6 @@ jobs:
           python3 test/test_tools.py
 
       - name: Smoke test - whole network locally (fake TON)
-        continue-on-error: true
         run: |
           # proxy + worker + client + key manager + router on one machine; the client must come up and answer
           # router aborts without AMD SEV PKI files (even with the "@any" policy)
@@ -90,12 +89,17 @@ jobs:
           echo "--- /v1/models"; curl -s -m 10 http://127.0.0.1:10000/v1/models | head -c 600; echo
           echo "--- chat through the local network"
           curl -s -m 60 http://127.0.0.1:10000/v1/chat/completions -H 'Content-Type: application/json' \
-            -d '{"model":"Qwen/Qwen3-8B","max_tokens":32,"messages":[{"role":"user","content":"smoke"}]}' | head -c 800; echo
+            -d '{"model":"Qwen/Qwen3-8B","max_tokens":32,"messages":[{"role":"user","content":"smoke"}]}' > /tmp/chat.json
+          head -c 800 /tmp/chat.json; echo
           echo "--- router"; grep -a ROUTER /tmp/local-all.log | head -8
           echo "--- component status"; grep -aE "proxy|connect|ready|worker" /tmp/local-all.log | tail -40
           echo "--- log tail"; tail -40 /tmp/local-all.log
           pkill -f cocoon-launch; pkill -f -- '-runner --config'; pkill -f tee/router; true
           [ "$ok" = 1 ] || { echo "client did not come up"; exit 1; }
+          # end to end: client -> router -> proxy -> worker -> backend and back, with token accounting
+          jq -e '.choices[0].message.content | test("received: smoke")' /tmp/chat.json >/dev/null \
+            || { echo "chat request did not pass through the network"; exit 1; }
+          jq -e '.usage.total_tokens > 0' /tmp/chat.json >/dev/null || { echo "no usage accounting"; exit 1; }
 
       - name: Fetch TON testnet config
         run: ./scripts/fetch-testnet-ton-config
