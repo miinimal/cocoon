@@ -60,3 +60,9 @@ memory to compile TON.
 - Test mode does not verify TEE image hashes. Never expose a test-mode deployment publicly as if it
   were production.
 - Fake-TON (`--fake-ton`) and `--local-all` are unchanged.
+
+## Checking a client stake before a refund
+
+`scripts/client-stake-check <client_contract_address> [--testnet]` prints the client contract state,
+stake and prepaid balance from public chain data and warns before actions that can lock the stake
+(issue #77). It is read-only: nothing is signed or sent.

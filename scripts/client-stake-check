@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""client-stake-check - read-only inspection of a COCOON client contract.
+
+Shows the client contract state, prepaid balance and stake, and warns before
+actions that can leave the stake unrecoverable (see issue #77: the proxy does
+not yet issue refund grants, so a forced refund moves the contract to the
+closed state with the stake still locked).
+
+Nothing is signed or sent. Data comes from a public TON HTTP API (toncenter v3).
+
+Usage:
+    scripts/client-stake-check <client_contract_address> [--testnet] [--json]
+
+Requires: pip install pytoniq-core
+"""
+import argparse
+import base64
+import json
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+try:
+    from pytoniq_core import Cell
+except ImportError:
+    sys.exit('ERROR: pytoniq-core is required: pip install pytoniq-core')
+
+API = {
+    'mainnet': 'https://toncenter.com/api/v3',
+    'testnet': 'https://testnet.toncenter.com/api/v3',
+}
+STATES = {0: 'open', 1: 'refund requested (closing)', 2: 'closed'}
+NANO = 10 ** 9
+
+
+def fetch_account(address: str, net: str) -> dict:
+    url = f'{API[net]}/account?address={urllib.parse.quote(address)}'
+    req = urllib.request.Request(url, headers={'User-Agent': 'cocoon-client-stake-check'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+
+
+def parse_client_data(data_b64: str) -> dict:
+    # Layout matches ClientContract::on_state_update:
+    # state:uint2 balance:Coins stake:Coins tokens_used:int64 unlock_ts:int32 secret_hash:bits256
+    # ref0: owner_address proxy_address ...
+    cell = Cell.one_from_boc(base64.b64decode(data_b64))
+    s = cell.begin_parse()
+    out = {
+        'state': s.load_uint(2),
+        'balance': s.load_coins(),
+        'stake': s.load_coins(),
+        'tokens_used': s.load_int(64),
+        'unlock_ts': s.load_int(32),
+    }
+    if cell.refs:
+        try:
+            r = cell.refs[0].begin_parse()
+            out['owner'] = r.load_address().to_str(is_bounceable=False)
+            out['proxy'] = r.load_address().to_str(is_bounceable=True)
+        except Exception:
+            pass
+    return out
+
+
+def advice(info: dict, now: int) -> list[str]:
+    state, stake, balance = info['state'], info['stake'], info['balance']
+    notes = []
+    if state == 0:
+        notes.append('Contract is open. Prepaid balance can be withdrawn by the owner while the contract stays open.')
+        if stake:
+            notes.append('WARNING: do not request a refund to recover the stake yet. The proxy does not issue '
+                         'refund grants (issue #77); a forced refund closes the contract with the stake locked.')
+    elif state == 1:
+        left = info['unlock_ts'] - now
+        notes.append('Refund was requested. ' +
+                     (f'Unlock in {left // 3600}h {left % 3600 // 60}m.' if left > 0 else 'Unlock time has passed.'))
+        if stake:
+            notes.append('WARNING: a second refund request forces the close and currently leaves the stake '
+                         'locked (issue #77). Wait for a proxy-side fix before forcing.')
+    elif state == 2:
+        if stake:
+            notes.append(f'STUCK: contract is closed with {stake / NANO:g} TON stake still locked. Only a refund '
+                         'grant signed by the proxy can release it (issue #77).')
+        else:
+            notes.append('Contract is closed and holds no stake.')
+    if state != 0 and balance:
+        notes.append(f'{balance / NANO:g} TON of prepaid balance is also held by the contract.')
+    return notes
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument('address', help='client contract address')
+    p.add_argument('--testnet', action='store_true', help='query TON testnet')
+    p.add_argument('--json', action='store_true', help='machine-readable output')
+    a = p.parse_args()
+    net = 'testnet' if a.testnet else 'mainnet'
+
+    acc = fetch_account(a.address, net)
+    if acc.get('status') != 'active' or not acc.get('data'):
+        print(f'{a.address}: account is {acc.get("status", "unknown")}, no client contract state on {net}')
+        return 2
+    try:
+        info = parse_client_data(acc['data'])
+    except Exception:
+        info = {}
+    if 'owner' not in info or 'proxy' not in info:
+        print(f'{a.address}: data does not look like a COCOON client contract (wrong address type?)')
+        return 3
+    info['account_balance'] = int(acc.get('balance') or 0)
+    info['notes'] = advice(info, int(time.time()))
+
+    if a.json:
+        print(json.dumps(info, indent=2))
+        return 0
+    print(f'Client contract  {a.address} ({net})')
+    print(f'State            {info["state"]} - {STATES.get(info["state"], "unknown")}')
+    print(f'Stake            {info["stake"] / NANO:g} TON')
+    print(f'Prepaid balance  {info["balance"] / NANO:g} TON')
+    print(f'Tokens used      {info["tokens_used"]}')
+    print(f'Account balance  {info["account_balance"] / NANO:g} TON')
+    if info['unlock_ts']:
+        print(f'Unlock time      {time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(info["unlock_ts"]))}')
+    if 'owner' in info:
+        print(f'Owner            {info["owner"]}')
+        print(f'Proxy            {info["proxy"]}')
+    print()
+    for n in info['notes']:
+        print('- ' + n)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
