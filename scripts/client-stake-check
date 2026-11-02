@@ -95,10 +95,11 @@ def main() -> int:
     p.add_argument('address', help='client contract address')
     p.add_argument('--testnet', action='store_true', help='query TON testnet')
     p.add_argument('--json', action='store_true', help='machine-readable output')
+    p.add_argument('--from-file', help='read account state (toncenter v3 /account JSON) from a file instead of the API')
     a = p.parse_args()
     net = 'testnet' if a.testnet else 'mainnet'
 
-    acc = fetch_account(a.address, net)
+    acc = json.load(open(a.from_file)) if a.from_file else fetch_account(a.address, net)
     if acc.get('status') != 'active' or not acc.get('data'):
         print(f'{a.address}: account is {acc.get("status", "unknown")}, no client contract state on {net}')
         return 2

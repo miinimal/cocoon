@@ -62,6 +62,11 @@ jobs:
       - name: Test request validation (function calling, structured output)
         run: ./build/test-validate-request
 
+      - name: Test tools (stake checker, testnet backend)
+        run: |
+          pip install -q pytoniq-core
+          python3 test/test_tools.py
+
       - name: Smoke test - whole network locally (fake TON)
         continue-on-error: true
         run: |
