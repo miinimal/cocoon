@@ -14,13 +14,14 @@ RUN test -n "$RELEASE_URL" || (echo "RELEASE_URL build arg is required" && exit 
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates curl jq python3 xz-utils \
+      ca-certificates curl jq python3 xz-utils openssl \
       libatomic1 libboost-thread1.83.0 libboost-atomic1.83.0 zlib1g \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/cocoon
 RUN curl -fsSL "$RELEASE_URL" | tar -xJ -C /opt/cocoon \
- && ./scripts/fetch-testnet-ton-config
+ && ./scripts/fetch-testnet-ton-config \
+ && ./scripts/fetch-sev-pki /etc/tee/sev
 
 COPY entrypoint.sh /usr/local/bin/cocoon-testnet-node
 RUN chmod +x /usr/local/bin/cocoon-testnet-node

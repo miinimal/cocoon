@@ -72,6 +72,9 @@ jobs:
         continue-on-error: true
         run: |
           # proxy + worker + client + key manager + router on one machine; the client must come up and answer
+          # router aborts without AMD SEV PKI files (even with the "@any" policy)
+          sudo ./scripts/fetch-sev-pki /etc/tee/sev
+          python3 ./scripts/testnet-backend --port 8000 --model Qwen/Qwen3-8B > /tmp/backend.log 2>&1 &
           ./scripts/cocoon-launch --local-all --skip-build --build-dir build > /tmp/local-all.log 2>&1 &
           ok=0
           for i in $(seq 1 30); do
@@ -80,6 +83,10 @@ jobs:
           done
           echo "--- client /stats"; head -40 /tmp/client-stats.txt 2>/dev/null
           echo "--- /v1/models"; curl -s -m 10 http://127.0.0.1:10000/v1/models | head -c 600; echo
+          echo "--- chat through the local network"
+          curl -s -m 60 http://127.0.0.1:10000/v1/chat/completions -H 'Content-Type: application/json' \
+            -d '{"model":"Qwen/Qwen3-8B","max_tokens":32,"messages":[{"role":"user","content":"smoke"}]}' | head -c 800; echo
+          echo "--- router"; grep -a ROUTER /tmp/local-all.log | head -8
           echo "--- component status"; grep -aE "proxy|connect|ready|worker" /tmp/local-all.log | tail -40
           echo "--- log tail"; tail -40 /tmp/local-all.log
           pkill -f cocoon-launch; pkill -f -- '-runner --config'; pkill -f tee/router; true
