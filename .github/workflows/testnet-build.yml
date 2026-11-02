@@ -1,0 +1,105 @@
+name: testnet-build
+
+# Builds COCOON binaries on a GitHub-hosted runner, validates the --testnet
+# launcher path and publishes the binaries as a GitHub Release so that a
+# server without enough RAM to compile TON can download and run them.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [testnet]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: testnet-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang cmake ninja-build pkg-config ccache jq \
+            libssl-dev zlib1g-dev liblz4-dev libsodium-dev libjemalloc-dev \
+            libmicrohttpd-dev libboost-thread-dev libsecp256k1-dev
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -GNinja -S . -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DTON_USE_JEMALLOC=ON \
+            -DTON_USE_ABSEIL=OFF \
+            -DTON_ONLY_TONLIB=ON \
+            -DTON_USE_ROCKSDB=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build cocoon-all
+        run: cmake --build build -j"$(nproc)" --target cocoon-all
+
+      - name: Fetch TON testnet config
+        run: ./scripts/fetch-testnet-ton-config
+
+      - name: Validate testnet launcher path
+        run: |
+          # worker is skipped here: preparing it downloads and packs a model
+          for t in proxy client key-manager; do
+            rm -rf /tmp/cocoon-spec-*
+            ./scripts/cocoon-launch --type "$t" --test --testnet --skip-build --prepare-only \
+              --owner-address 0QAuz15H1ZHrZ_psVrAra7HealMIVeFq0wguqlmFno1f3B-m \
+              --build-dir build \
+              || { echo "prepare failed for $t"; exit 1; }
+            spec=$(ls -d /tmp/cocoon-spec-*/spec)
+            grep -qx 'IS_TESTNET=1' "$spec/runtime/runtime.vars" || { echo "IS_TESTNET not set for $t"; exit 1; }
+            cmp -s <(jq -S .validator.zero_state "$spec/global.config.json") \
+                   <(jq -S .validator.zero_state spec/testnet-base-ton-config.json) \
+              || { echo "testnet TON config not applied for $t"; exit 1; }
+            grep -q '"is_testnet" : "\$IS_TESTNET"' "$spec"/*-config.json || { echo "spec template missing IS_TESTNET for $t"; exit 1; }
+          done
+          # --testnet without --test must be rejected
+          if ./scripts/cocoon-launch --type proxy --testnet --skip-build --prepare-only \
+               --owner-address 0QAuz15H1ZHrZ_psVrAra7HealMIVeFq0wguqlmFno1f3B-m; then
+            echo "expected --testnet without --test to fail"; exit 1
+          fi
+
+      - name: Package binaries
+        run: |
+          mkdir -p dist/bin
+          find build -type f -perm -u+x ! -name '*.so*' ! -path '*/CMakeFiles/*' \
+            \( -name 'cocoon-*' -o -name 'router' -o -name 'gen-cert' -o -name '*runner*' \) \
+            -exec cp {} dist/bin/ \;
+          cp -r scripts spec reprodebian dist/
+          ls -la dist/bin
+          tar -C dist -cJf cocoon-testnet-linux-x64.tar.xz .
+          sha256sum cocoon-testnet-linux-x64.tar.xz | tee cocoon-testnet-linux-x64.tar.xz.sha256
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="testnet-${GITHUB_SHA::7}"
+          gh release create "$tag" cocoon-testnet-linux-x64.tar.xz cocoon-testnet-linux-x64.tar.xz.sha256 \
+            --title "COCOON testnet build ${GITHUB_SHA::7}" \
+            --notes "Automated build of the testnet branch. Binaries for local/test-mode runs on TON testnet. Not for production." \
+            --prerelease

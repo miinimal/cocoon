@@ -84,6 +84,7 @@ class Config:
     # Runtime control
     test: bool = False
     fake_ton: bool = False  # Disable real TON, use fake TON for testing
+    testnet: bool = False  # Use TON testnet instead of mainnet (requires test mode)
     local_mode: bool = False  # True for --local-all and local client execution
     instance: int = 0
 
@@ -204,6 +205,7 @@ class Config:
             vars.setdefault('HF_TOKEN', self.hf_token)
         if self.node_wallet_key:
             vars.setdefault('NODE_WALLET_KEY', self.node_wallet_key)
+        vars.setdefault('IS_TESTNET', int(self.testnet))
 
         return vars
 
@@ -290,6 +292,11 @@ def load_config_from_file(cli_args) -> Config:
     spec = cli_args.spec or str(script_dir / 'spec' / f'spec-{node_type}')
     fake_ton = getbool('fake_ton', False)
     test = getbool('test', False)
+    testnet = getbool('testnet', False)
+    if testnet and not test:
+        # Runners refuse testnet outside of test mode (see KeyManagerRunner::load_config)
+        sys.exit('ERROR: --testnet requires --test')
+    ton_net = 'testnet' if testnet else 'mainnet'
 
     # Build config (ordered to match Config dataclass)
     cfg = Config(
@@ -308,15 +315,16 @@ def load_config_from_file(cli_args) -> Config:
         # Runtime control
         test=test,
         fake_ton=fake_ton,
+        testnet=testnet,
         instance=instance,
         # Worker-specific
         worker_coefficient=get('worker_coefficient', '1000'),
         hf_token=get('hf_token') or os.environ.get('HF_TOKEN'),
         # TON configs
         ton_config_base=get('ton_config_base',
-                            str(script_dir / 'spec/mainnet-base-ton-config.json')) if not fake_ton else None,
+                            str(script_dir / f'spec/{ton_net}-base-ton-config.json')) if not fake_ton else None,
         ton_config=get('ton_config',
-                       str(script_dir / 'spec/mainnet-full-ton-config.json')) if not fake_ton else None,
+                       str(script_dir / f'spec/{ton_net}-full-ton-config.json')) if not fake_ton else None,
         # Paths
         image_dir=get('image-dir', str(script_dir / 'images' / ('test' if test else 'prod'))),
         build_dir=get('build_dir', build_dir),
@@ -895,6 +903,8 @@ def parse_args():
     parser.add_argument('--test', action='store_true', default=None, help='Test mode (debug shell, SSH)')
     parser.add_argument('--fake-ton', '--pseudo', action='store_true', default=None, dest='fake_ton',
                         help='Fake-TON mode (disable real TON network)')
+    parser.add_argument('--testnet', action='store_true', default=None,
+                        help='Use TON testnet (requires --test; run scripts/fetch-testnet-ton-config first)')
     parser.add_argument('--local-all', action='store_true', help='Run all components locally')
     parser.add_argument('--prepare-only', action='store_true', help='Prepare spec to /tmp/spec/')
     parser.add_argument('--print-only', action='store_true', help='Print command and exit')
