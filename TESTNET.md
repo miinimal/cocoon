@@ -1,7 +1,7 @@
 # MINIMALCULT testnet for COCOON (community, unofficial)
 
 A public network running the COCOON protocol on **TON testnet**: build and test clients, agents and payment flows against the
-real COCOON protocol and contracts with free test coins, before touching mainnet.
+real COCOON protocol and contracts with free test GRAM, before touching mainnet.
 
 Telegram's official testnet root contract is not deployed on TON testnet, so this network runs its own
 root contract with mainnet-like parameters. Maintained by [MINIMALCULT](https://github.com/miinimal);
@@ -14,13 +14,13 @@ not affiliated with or endorsed by Telegram. COCOON is Telegram's project, licen
 | Root contract | [`kQDw1ylF_89nG60ustm4vxrxMPx_chvPStTQs_0OqI1PunDa`](https://testnet.tonviewer.com/kQDw1ylF_89nG60ustm4vxrxMPx_chvPStTQs_0OqI1PunDa) |
 | Proxy #1 | `165.227.61.128:11001` (workers), `165.227.61.128:11002` (clients) |
 | Mode | test (`is_test`), TEE image hashes not enforced |
-| Price | 20 nanoTON per token (prompt x1, completion x8) — same as mainnet |
+| Price | 0.00000002 GRAM per token (prompt x1, completion x8) — same as mainnet |
 | Worker share | 95% |
-| Min client stake / min proxy stake | 0.5 TON / 0.5 TON |
+| Min client stake / min proxy stake | 0.5 GRAM / 0.5 GRAM |
 | Close delay (client and proxy) | 1 hour (mainnet: 1 day) — refund paths can be tested quickly |
 | Models | test backend (`scripts/testnet-backend`), replies are labelled as testnet output |
 
-Test coins: [@testgiver_ton_bot](https://t.me/testgiver_ton_bot) (2 coins per request).
+Test GRAM: [@testgiver_ton_bot](https://t.me/testgiver_ton_bot) (2 GRAM per request).
 
 ## Connect a client
 
@@ -50,4 +50,4 @@ Details: [docs/testnet.md](docs/testnet.md).
 
 ## Status
 
-Testnet only. Test coins have no value.
+Testnet only. Test GRAM has no value.

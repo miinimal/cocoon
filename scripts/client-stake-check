@@ -81,12 +81,12 @@ def advice(info: dict, now: int) -> list[str]:
                          'locked (issue #77). Wait for a proxy-side fix before forcing.')
     elif state == 2:
         if stake:
-            notes.append(f'STUCK: contract is closed with {stake / NANO:g} TON stake still locked. Only a refund '
+            notes.append(f'STUCK: contract is closed with {stake / NANO:g} GRAM stake still locked. Only a refund '
                          'grant signed by the proxy can release it (issue #77).')
         else:
             notes.append('Contract is closed and holds no stake.')
     if state != 0 and balance:
-        notes.append(f'{balance / NANO:g} TON of prepaid balance is also held by the contract.')
+        notes.append(f'{balance / NANO:g} GRAM of prepaid balance is also held by the contract.')
     return notes
 
 
@@ -117,10 +117,10 @@ def main() -> int:
         return 0
     print(f'Client contract  {a.address} ({net})')
     print(f'State            {info["state"]} - {STATES.get(info["state"], "unknown")}')
-    print(f'Stake            {info["stake"] / NANO:g} TON')
-    print(f'Prepaid balance  {info["balance"] / NANO:g} TON')
+    print(f'Stake            {info["stake"] / NANO:g} GRAM')
+    print(f'Prepaid balance  {info["balance"] / NANO:g} GRAM')
     print(f'Tokens used      {info["tokens_used"]}')
-    print(f'Account balance  {info["account_balance"] / NANO:g} TON')
+    print(f'Account balance  {info["account_balance"] / NANO:g} GRAM')
     if info['unlock_ts']:
         print(f'Unlock time      {time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(info["unlock_ts"]))}')
     if 'owner' in info:

@@ -54,7 +54,7 @@ COCOON_LOCAL_CLIENT_WALLET_KEY=<base64 key> \
 ```
 
 Without the `COCOON_LOCAL_*_WALLET_KEY` overrides the public test keys from the launcher are used; fund
-whichever wallets you use with testnet coins. The proxy address registered in your root contract must
+whichever wallets you use with test GRAM. The proxy address registered in your root contract must
 point at this machine (ports 11001/11002).
 
 ## 3. Root contract
@@ -63,7 +63,7 @@ The mainnet root contract address is the default and does not exist on testnet. 
 contract to testnet with [cocoon-contracts](https://github.com/TelegramMessenger/cocoon-contracts),
 list your proxy addresses in it, and pass it with `--root-contract-address`.
 
-Fund the proxy, worker and client wallets with testnet TON (see each component's HTTP stats for the
+Fund the proxy, worker and client wallets with test GRAM (see each component's HTTP stats for the
 wallet addresses).
 
 ## 4. Prebuilt binaries
