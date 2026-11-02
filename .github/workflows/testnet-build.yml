@@ -73,7 +73,8 @@ jobs:
           done
           echo "--- client /stats"; head -40 /tmp/client-stats.txt 2>/dev/null
           echo "--- /v1/models"; curl -s -m 10 http://127.0.0.1:10000/v1/models | head -c 600; echo
-          echo "--- log tail"; tail -60 /tmp/local-all.log
+          echo "--- component status"; grep -aE "proxy|connect|ready|worker" /tmp/local-all.log | tail -40
+          echo "--- log tail"; tail -40 /tmp/local-all.log
           pkill -f cocoon-launch; pkill -f -- '-runner --config'; pkill -f tee/router; true
           [ "$ok" = 1 ] || { echo "client did not come up"; exit 1; }
 

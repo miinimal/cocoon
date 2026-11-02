@@ -25,6 +25,10 @@ def run(cmd, **kwargs):
 def popen(cmd, **kwargs):
     """subprocess.Popen wrapper that prints command"""
     print(f'+ {" ".join(str(x) for x in cmd)}')
+    if kwargs.get('text'):
+        # Runner output may contain non-UTF-8 bytes (binary dumps, crash traces). A strict decoder kills the
+        # log-forwarding thread, the pipe then fills up and the child blocks on write.
+        kwargs.setdefault('errors', 'replace')
     return subprocess.Popen(cmd, **kwargs)
 
 
