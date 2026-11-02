@@ -20,7 +20,9 @@ not affiliated with or endorsed by Telegram. COCOON is Telegram's project, licen
 | Close delay (client and proxy) | 1 hour (mainnet: 1 day) — refund paths can be tested quickly |
 | Models | test backend (`scripts/testnet-backend`), replies are labelled as testnet output |
 
-Test GRAM: [@testgiver_ton_bot](https://t.me/testgiver_ton_bot) (2 GRAM per request).
+Test GRAM: [@testgiver_ton_bot](https://t.me/testgiver_ton_bot) or `acton wallet airdrop` (2 GRAM per request).
+Every node wallet (proxy, worker, client, key manager) needs at least 2 GRAM: the COCOON wallet contract
+refuses to send below that (exit code 1035).
 
 ## Connect a client
 
