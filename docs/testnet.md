@@ -66,3 +66,18 @@ memory to compile TON.
 `scripts/client-stake-check <client_contract_address> [--testnet]` prints the client contract state,
 stake and prepaid balance from public chain data and warns before actions that can lock the stake
 (issue #77). It is read-only: nothing is signed or sent.
+
+## COCOON client in a container
+
+`docker/client` packages the client (no TEE hardware needed) with an OpenAI-compatible endpoint on
+port 10000. Build it from a `testnet-build` release tarball:
+
+```bash
+docker build -t cocoon-client --build-arg RELEASE_URL=<release tarball URL> docker/client
+docker run -d -p 127.0.0.1:10000:10000 \
+  -e OWNER_ADDRESS=<owner address> -e NODE_WALLET_KEY=<client wallet key> cocoon-client
+curl http://127.0.0.1:10000/v1/models
+```
+
+Set `COCOON_NET=testnet` and `ROOT_CONTRACT_ADDRESS` to run against TON testnet.
+Keep `NODE_WALLET_KEY` secret; bind the port to localhost unless the endpoint is protected.

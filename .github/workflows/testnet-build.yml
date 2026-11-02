@@ -88,12 +88,19 @@ jobs:
 
       - name: Package binaries
         run: |
-          mkdir -p dist/bin
-          find build -type f -perm -u+x ! -name '*.so*' ! -path '*/CMakeFiles/*' \
-            \( -name 'cocoon-*' -o -name 'router' -o -name 'gen-cert' -o -name '*runner*' \) \
-            -exec cp {} dist/bin/ \;
+          # Keep the layout cocoon-launch expects: <build_dir>/*-runner, <build_dir>/tee/{router,cocoon-subst,gen-cert}
+          mkdir -p dist/build/tee
+          for b in client-runner proxy-runner worker-runner key-manager-runner sync-time generate-cocoon-wallet-address; do
+            install -m 755 "build/$b" dist/build/
+          done
+          for b in router cocoon-subst gen-cert; do
+            install -m 755 "build/tee/$b" dist/build/tee/
+          done
+          strip --strip-debug dist/build/*-runner dist/build/tee/* || true
           cp -r scripts spec reprodebian dist/
-          ls -la dist/bin
+          find dist/build -type f | sort
+          echo "--- runtime libraries of client-runner ---"
+          ldd dist/build/client-runner | sort
           tar -C dist -cJf cocoon-testnet-linux-x64.tar.xz .
           sha256sum cocoon-testnet-linux-x64.tar.xz | tee cocoon-testnet-linux-x64.tar.xz.sha256
 
