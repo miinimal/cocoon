@@ -12,7 +12,7 @@ RUN test -n "$RELEASE_URL" || (echo "RELEASE_URL build arg is required" && exit 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl jq python3 xz-utils \
-      libssl3t64 zlib1g liblz4-1 libsodium23 libjemalloc2 libmicrohttpd12t64 libsecp256k1-2 \
+      libatomic1 libboost-thread1.83.0 libboost-atomic1.83.0 zlib1g \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/cocoon

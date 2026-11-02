@@ -40,6 +40,23 @@ What `--testnet` changes:
 
 Explicit `--ton-config-base` / `--ton-config` still take precedence.
 
+## Whole network on one machine, on real testnet
+
+`--local-all` runs proxy, worker, client and key manager locally without VMs. With `--testnet` it talks
+to TON testnet instead of fake TON:
+
+```bash
+./scripts/fetch-testnet-ton-config
+COCOON_LOCAL_PROXY_WALLET_KEY=<base64 key> COCOON_LOCAL_WORKER_WALLET_KEY=<base64 key> \
+COCOON_LOCAL_CLIENT_WALLET_KEY=<base64 key> \
+./scripts/cocoon-launch --local-all --testnet --root-contract-address <your testnet root> \
+  --owner-address <owner address>
+```
+
+Without the `COCOON_LOCAL_*_WALLET_KEY` overrides the public test keys from the launcher are used; fund
+whichever wallets you use with testnet coins. The proxy address registered in your root contract must
+point at this machine (ports 11001/11002).
+
 ## 3. Root contract
 
 The mainnet root contract address is the default and does not exist on testnet. Deploy your own root

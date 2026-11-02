@@ -61,6 +61,22 @@ jobs:
       - name: Test request validation (function calling, structured output)
         run: ./build/test-validate-request
 
+      - name: Smoke test - whole network locally (fake TON)
+        continue-on-error: true
+        run: |
+          # proxy + worker + client + key manager + router on one machine; the client must come up and answer
+          ./scripts/cocoon-launch --local-all --skip-build --build-dir build > /tmp/local-all.log 2>&1 &
+          ok=0
+          for i in $(seq 1 30); do
+            sleep 3
+            if curl -sf -m 5 http://127.0.0.1:10000/stats > /tmp/client-stats.txt; then ok=1; break; fi
+          done
+          echo "--- client /stats"; head -40 /tmp/client-stats.txt 2>/dev/null
+          echo "--- /v1/models"; curl -s -m 10 http://127.0.0.1:10000/v1/models | head -c 600; echo
+          echo "--- log tail"; tail -60 /tmp/local-all.log
+          pkill -f cocoon-launch; pkill -f -- '-runner --config'; pkill -f tee/router; true
+          [ "$ok" = 1 ] || { echo "client did not come up"; exit 1; }
+
       - name: Fetch TON testnet config
         run: ./scripts/fetch-testnet-ton-config
 
