@@ -94,7 +94,7 @@ jobs:
           echo "--- router"; grep -a ROUTER /tmp/local-all.log | head -8
           echo "--- component status"; grep -aE "proxy|connect|ready|worker" /tmp/local-all.log | tail -40
           echo "--- log tail"; tail -40 /tmp/local-all.log
-          pkill -f cocoon-launch; pkill -f -- '-runner --config'; pkill -f tee/router; true
+          pkill -f cocoon-launch || true; pkill -f -- '-runner --config' || true; pkill -f tee/router || true
           [ "$ok" = 1 ] || { echo "client did not come up"; exit 1; }
           # end to end: client -> router -> proxy -> worker -> backend and back, with token accounting
           jq -e '.choices[0].message.content | test("received: smoke")' /tmp/chat.json >/dev/null \
