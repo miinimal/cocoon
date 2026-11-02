@@ -2,9 +2,11 @@
 """client-stake-check - read-only inspection of a COCOON client contract.
 
 Shows the client contract state, prepaid balance and stake, and warns before
-actions that can leave the stake unrecoverable (see issue #77: the proxy does
-not yet issue refund grants, so a forced refund moves the contract to the
-closed state with the stake still locked).
+actions that can leave the stake unrecoverable (issue #77). A forced refund pays
+at most the proxy's own stake, so while the proxy issues no refund grants it can
+return less than the client's stake. For a closed contract the proxy's payouts to
+the owner are summed: the stake field keeps its value after closing, so a closed
+contract is reported STUCK only if the stake was not paid back.
 
 Nothing is signed or sent. Data comes from a public TON HTTP API (toncenter v3).
 
@@ -64,25 +66,41 @@ def parse_client_data(data_b64: str) -> dict:
     return out
 
 
+def fetch_paid_back(info: dict, net: str):
+    url = (f'{API[net]}/messages?source={urllib.parse.quote(info["proxy"])}'
+           f'&destination={urllib.parse.quote(info["owner"])}&limit=100')
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'cocoon-client-stake-check'})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return sum(int(m.get('value') or 0) for m in json.load(r).get('messages', []))
+    except Exception:
+        return None
+
+
 def advice(info: dict, now: int) -> list[str]:
     state, stake, balance = info['state'], info['stake'], info['balance']
     notes = []
     if state == 0:
         notes.append('Contract is open. Prepaid balance can be withdrawn by the owner while the contract stays open.')
         if stake:
-            notes.append('WARNING: do not request a refund to recover the stake yet. The proxy does not issue '
-                         'refund grants (issue #77); a forced refund closes the contract with the stake locked.')
+            notes.append('WARNING: a forced refund pays at most the proxy\'s own stake. While the proxy issues no '
+                         'refund grants (issue #77), forcing can close the contract without returning the stake.')
     elif state == 1:
         left = info['unlock_ts'] - now
         notes.append('Refund was requested. ' +
                      (f'Unlock in {left // 3600}h {left % 3600 // 60}m.' if left > 0 else 'Unlock time has passed.'))
         if stake:
-            notes.append('WARNING: a second refund request forces the close and currently leaves the stake '
-                         'locked (issue #77). Wait for a proxy-side fix before forcing.')
+            notes.append('WARNING: a second refund request forces the close; it pays at most the proxy\'s own stake '
+                         '(issue #77). Without a refund grant from the proxy, forcing can lose the stake.')
     elif state == 2:
-        if stake:
-            notes.append(f'STUCK: contract is closed with {stake / NANO:g} GRAM stake still locked. Only a refund '
-                         'grant signed by the proxy can release it (issue #77).')
+        paid = info.get('paid_back')
+        if stake and paid is None:
+            notes.append('Contract is closed; could not check whether the proxy paid the stake back.')
+        elif stake and paid < stake - NANO // 2:
+            notes.append(f'STUCK: closed, but the proxy paid back only {paid / NANO:g} GRAM of the {stake / NANO:g} '
+                         'GRAM stake; only the proxy operator can return the rest (issue #77).')
+        elif stake:
+            notes.append(f'Closed and refunded: the proxy paid {paid / NANO:g} GRAM back to the owner.')
         else:
             notes.append('Contract is closed and holds no stake.')
     if state != 0 and balance:
@@ -96,6 +114,7 @@ def main() -> int:
     p.add_argument('--testnet', action='store_true', help='query TON testnet')
     p.add_argument('--json', action='store_true', help='machine-readable output')
     p.add_argument('--from-file', help='read account state (toncenter v3 /account JSON) from a file instead of the API')
+    p.add_argument('--paid-back-nano', type=int, help='proxy payouts to the owner (offline use); fetched otherwise')
     a = p.parse_args()
     net = 'testnet' if a.testnet else 'mainnet'
 
@@ -111,6 +130,8 @@ def main() -> int:
         print(f'{a.address}: data does not look like a COCOON client contract (wrong address type?)')
         return 3
     info['account_balance'] = int(acc.get('balance') or 0)
+    if info['state'] == 2 and info['stake']:
+        info['paid_back'] = a.paid_back_nano if a.paid_back_nano is not None else fetch_paid_back(info, net)
     info['notes'] = advice(info, int(time.time()))
 
     if a.json:

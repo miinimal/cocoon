@@ -22,24 +22,29 @@ def check(name, cond, detail=''):
     failures += 0 if cond else 1
 
 
-def stake_check(fixture):
+def stake_check(fixture, *extra):
     out = subprocess.run([sys.executable, os.path.join(ROOT, 'scripts', 'client-stake-check'), 'x', '--json',
-                          '--from-file', os.path.join(FIX, fixture)], capture_output=True, text=True)
+                          '--from-file', os.path.join(FIX, fixture), *extra], capture_output=True, text=True)
     return out.returncode, (json.loads(out.stdout) if out.returncode == 0 else out.stdout + out.stderr)
 
 
-rc, info = stake_check('client-closed-stuck.json')
+# real mainnet client: closed with stake 15; its proxy paid back 1.387108995 GRAM in total (checked 2026-11-02)
+rc, info = stake_check('client-closed-stuck.json', '--paid-back-nano', '1387108995')
 check('stuck client parsed', rc == 0, info)
 if rc == 0:
     check('stuck client: state closed', info['state'] == 2)
     check('stuck client: stake 15 GRAM', info['stake'] == 15_000_000_000)
     check('stuck client: flagged STUCK', any(n.startswith('STUCK') for n in info['notes']), info['notes'])
 
+rc, info = stake_check('client-closed-stuck.json', '--paid-back-nano', '15689000000')
+check('refunded closed client: not STUCK', rc == 0 and not any(n.startswith('STUCK') for n in info['notes'])
+      and any(n.startswith('Closed and refunded') for n in info['notes']), info)
+
 rc, info = stake_check('client-open.json')
 check('open client parsed', rc == 0, info)
 if rc == 0:
     check('open client: state open', info['state'] == 0)
-    check('open client: refund warning present', any('do not request a refund' in n for n in info['notes']), info['notes'])
+    check('open client: refund warning present', any('forced refund pays at most' in n for n in info['notes']), info['notes'])
 
 # testnet-backend
 s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
