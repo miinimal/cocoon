@@ -82,6 +82,11 @@ jobs:
             if curl -sf -m 5 http://127.0.0.1:10000/stats > /tmp/client-stats.txt; then ok=1; break; fi
           done
           echo "--- client /stats"; head -40 /tmp/client-stats.txt 2>/dev/null
+          # the client is up before the worker has registered with the proxy; wait for a model to appear
+          for i in $(seq 1 40); do
+            curl -s -m 5 http://127.0.0.1:10000/v1/models | grep -q '"id"' && { echo "models ready after $((i*3))s"; break; }
+            sleep 3
+          done
           echo "--- /v1/models"; curl -s -m 10 http://127.0.0.1:10000/v1/models | head -c 600; echo
           echo "--- chat through the local network"
           curl -s -m 60 http://127.0.0.1:10000/v1/chat/completions -H 'Content-Type: application/json' \
