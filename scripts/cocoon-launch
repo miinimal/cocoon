@@ -284,12 +284,13 @@ def load_config_from_file(cli_args) -> Config:
     build_dir = get('build_dir') or os.environ.get('BUILD_DIR') or str(script_dir / 'cmake-build-default-tee')
     prepared_spec_dir = str(Path(tempfile.mkdtemp(prefix='cocoon-spec-')) / 'spec')
 
-    if cli_args.local_all:
-        return Config(node_type='local_all', spec_dir='', owner_address=get('owner_address') or '',
+    if cli_args.local_all or getattr(cli_args, 'local_worker', False):
+        return Config(node_type='local_worker' if getattr(cli_args, 'local_worker', False) else 'local_all',
+                      spec_dir='', owner_address=get('owner_address') or '',
                       build_dir=build_dir, prepared_spec_dir=prepared_spec_dir, local_run_dir='/tmp/run/',
                       local_mode=True, testnet=getbool('testnet', False),
-                      root_contract_address=get('root_contract_address', None),
-                      skip_build=bool(cli_args.skip_build))
+                      root_contract_address=get('root_contract_address', None), model=get('model', None),
+                      skip_build=bool(cli_args.skip_build), print_only=bool(cli_args.print_only))
 
     node_type = get('type', '').lower()
 
@@ -734,7 +735,17 @@ def ensure_build(build_dir: Path, targets: list[str]):
 
 def run_local_all(cfg):
     real_ton = cfg.testnet
-    print('=== Running COCOON locally (all components) ===')
+    # --local-worker: a single community worker (worker + router, no VM) that joins the proxies registered in a
+    # testnet root contract, with inference served by scripts/community-backend (or any server on 127.0.0.1:8000).
+    worker_only = cfg.node_type == 'local_worker'
+    if worker_only:
+        print('=== Running a COCOON community worker locally (worker + router, joins remote proxies) ===')
+        if not real_ton or not cfg.root_contract_address or not cfg.owner_address:
+            sys.exit('ERROR: --local-worker requires --testnet, --root-contract-address and --owner-address')
+        if not os.environ.get('COCOON_LOCAL_WORKER_WALLET_KEY'):
+            sys.exit('ERROR: --local-worker requires COCOON_LOCAL_WORKER_WALLET_KEY (base64 32-byte key, funded wallet)')
+    else:
+        print('=== Running COCOON locally (all components) ===')
     if real_ton:
         # Same local topology, but runners talk to TON testnet and to a root contract you deployed there.
         if not cfg.root_contract_address:
@@ -742,6 +753,10 @@ def run_local_all(cfg):
         print(f'TON testnet, Test, No VM. Root contract: {cfg.root_contract_address}')
     else:
         print('Fake TON, Test, No VM. Config is mostly ignored')
+    if worker_only and cfg.print_only:
+        print(f"worker: model {cfg.model or 'Qwen/Qwen3-8B'}, owner {cfg.owner_address}, "
+              f"root {cfg.root_contract_address}, backend 127.0.0.1:8000, router 127.0.0.1:8116")
+        return
 
     maybe_build(cfg)
 
@@ -754,7 +769,7 @@ def run_local_all(cfg):
         'owner_address': cfg.owner_address or 'UQAuz15H1ZHrZ_psVrAra7HealMIVeFq0wguqlmFno1f3B-m',
         'root_contract_address': (cfg.root_contract_address if real_ton
                                   else 'EQBT4hy4vMEZ9uxSCuhw_gBKh9_AwmHXLe7Wo0O4Vh-4kRjJ'),
-        'model': 'Qwen/Qwen3-8B',
+        'model': cfg.model or 'Qwen/Qwen3-8B',
     }
     ton_configs = {}
     if real_ton:
@@ -770,6 +785,8 @@ def run_local_all(cfg):
         ('client', 'ClientClientClientClientClientClientClientC=', 'gaEatwGNgLGOeFI/TRGfPdJG/K4G8picYHQkDHpLQ9w='),
         ('key-manager', 'KeyManagerKeyManagerKeyManagerKeyManagerKe0=', '4DV6iMUS16P6Y/6MlF6qfnxii7q2UWXUwSi4bgvcaf8='),
     ]:
+        if worker_only and node_type != 'worker':
+            continue
         # On real testnet each component pays/earns from its own wallet: override the public test keys with
         # funded ones via COCOON_LOCAL_<PROXY|WORKER|CLIENT|KEY_MANAGER>_WALLET_KEY.
         wallet_key = os.environ.get(f"COCOON_LOCAL_{node_type.upper().replace('-', '_')}_WALLET_KEY", app_key)
@@ -819,13 +836,14 @@ def run_local_all(cfg):
             if cfg_file.name != 'global.config.json':
                 run([str(cocoon_init / 'cocoon-render-config-local'), str(cfg_file)], check=True)
     if real_ton:
-        run([str(cocoon_init / 'cocoon-render-ton-config-local'), specs['proxy']], check=True)
+        run([str(cocoon_init / 'cocoon-render-ton-config-local'), specs.get('proxy') or specs['worker']], check=True)
 
     ton_args = [] if real_ton else ['--disable-ton', '/tmp/run/fake-ton-config.json']
 
     # Start all
     print('\nStarting components...')
-    run(['rm', '-rf', '/tmp/proxy-db/'], check=False)
+    if not worker_only:
+        run(['rm', '-rf', '/tmp/proxy-db/'], check=False)
 
     import threading
 
@@ -837,53 +855,29 @@ def run_local_all(cfg):
     procs = []
     threads = []
 
-    # Proxy (blue)
-    proxy_proc = popen(
-        [f'{cfg.build_dir}/proxy-runner', '--config', '/tmp/run/proxy-config.json', '-v3'] + ton_args,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    procs.append(proxy_proc)
-    t = threading.Thread(target=stream_output, args=(proxy_proc, 'PROXY ', '34'), daemon=True)
-    t.start()
-    threads.append(t)
+    def start(name, cmd, prefix, color):
+        proc = popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        procs.append(proc)
+        t = threading.Thread(target=stream_output, args=(proc, prefix, color), daemon=True)
+        t.start()
+        threads.append(t)
 
-    # Worker (green)
-    worker_proc = popen(
-        [f'{cfg.build_dir}/worker-runner', '--config', '/tmp/run/worker-config.json', '-v3'] + ton_args,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    procs.append(worker_proc)
-    t = threading.Thread(target=stream_output, args=(worker_proc, 'WORKER', '32'), daemon=True)
-    t.start()
-    threads.append(t)
+    def runner(kind):
+        return [f'{cfg.build_dir}/{kind}-runner', '--config', f'/tmp/run/{kind}-config.json', '-v3'] + ton_args
 
-    # Client (yellow)
-    client_proc = popen(
-        [f'{cfg.build_dir}/client-runner', '--config', '/tmp/run/client-config.json', '-v3'] + ton_args,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    procs.append(client_proc)
-    t = threading.Thread(target=stream_output, args=(client_proc, 'CLIENT', '33'), daemon=True)
-    t.start()
-    threads.append(t)
-
-    # Key Manager (magenta)
-    key_manager_proc = popen(
-        [f'{cfg.build_dir}/key-manager-runner', '--config', '/tmp/run/key-manager-config.json', '-v3'] + ton_args,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    procs.append(key_manager_proc)
-    t = threading.Thread(target=stream_output, args=(key_manager_proc, 'KEYMANAGER', '35'), daemon=True)
-    t.start()
-    threads.append(t)
-
-    # Proxy-cli (cyan)
-    proxycli_proc = popen([f'{cfg.build_dir}/tee/router', '-S', '8116@any',
-                           '-R', '11001:127.0.0.1:11101@any',
-                           '-R', '11002:127.0.0.1:11102@any',
-                           '-R', '13001:127.0.0.1:13101@any',
-                           '--serialize-info'],
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    procs.append(proxycli_proc)
-    t = threading.Thread(target=stream_output, args=(proxycli_proc, 'ROUTER', '36'), daemon=True)
-    t.start()
-    threads.append(t)
+    if not worker_only:
+        start('proxy', runner('proxy'), 'PROXY ', '34')            # blue
+    start('worker', runner('worker'), 'WORKER', '32')              # green
+    if not worker_only:
+        start('client', runner('client'), 'CLIENT', '33')          # yellow
+        start('key-manager', runner('key-manager'), 'KEYMANAGER', '35')  # magenta
+    # Router (cyan). Local-all remaps the proxy/key-manager ports to this host; a community worker dials the
+    # proxies registered in the root contract directly.
+    router = [f'{cfg.build_dir}/tee/router', '-S', '8116@any']
+    if not worker_only:
+        router += ['-R', '11001:127.0.0.1:11101@any', '-R', '11002:127.0.0.1:11102@any',
+                   '-R', '13001:127.0.0.1:13101@any']
+    start('router', router + ['--serialize-info'], 'ROUTER', '36')
 
     print('\nAll components started. Press Ctrl+C to stop.')
 
@@ -931,6 +925,8 @@ def parse_args():
     parser.add_argument('--testnet', action='store_true', default=None,
                         help='Use TON testnet (requires --test; run scripts/fetch-testnet-ton-config first)')
     parser.add_argument('--local-all', action='store_true', help='Run all components locally')
+    parser.add_argument('--local-worker', action='store_true',
+                        help='Run one community worker locally (no VM, testnet) that joins remote proxies')
     parser.add_argument('--prepare-only', action='store_true', help='Prepare spec to /tmp/spec/')
     parser.add_argument('--print-only', action='store_true', help='Print command and exit')
     parser.add_argument('--skip-build', action='store_true', help='Skip auto-build (use existing binaries)')

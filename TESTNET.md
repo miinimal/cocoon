@@ -27,7 +27,7 @@ end-to-end request (client, router, proxy, worker, backend, with token accountin
 | Worker share | 95% |
 | Min client stake / min proxy stake | 0.5 GRAM / 0.5 GRAM |
 | Close delay (client and proxy) | 1 hour (mainnet: 1 day) — refund paths can be tested quickly |
-| Models | test backend (`scripts/testnet-backend`), replies are labelled as testnet output |
+| Models | test backend (`scripts/testnet-backend`) on proxy #1's node; community workers serve real models ([COMMUNITY.md](COMMUNITY.md)) |
 
 Test GRAM: [@testgiver_ton_bot](https://t.me/testgiver_ton_bot) or `acton wallet airdrop` (2 GRAM per request).
 Every node wallet (proxy, worker, client, key manager) needs at least 2 GRAM: the COCOON wallet contract
@@ -55,6 +55,8 @@ Or run a whole node (proxy + worker + client) yourself with `docker/testnet-node
 - function calling (`tools`, `tool_choice`) and `response_format` accepted by the worker validator (#71)
 - `scripts/client-stake-check`: read-only client stake inspection, warns before actions that lock the stake (#77)
 - `scripts/testnet-backend`: OpenAI-compatible stub so GPU-less test workers complete requests end to end
+- community workers: `scripts/community-backend` + `--local-worker` + `docker/community-worker` — serve a real open
+  model (Ollama, llama.cpp, LM Studio, vLLM) from your own machine, see [COMMUNITY.md](COMMUNITY.md)
 - portable x86-64-v2 release builds, client and node containers, CI smoke test of the whole local network
 
 Details: [docs/testnet.md](docs/testnet.md).
