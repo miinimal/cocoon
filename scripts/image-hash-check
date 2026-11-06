@@ -14,6 +14,14 @@ worker_hash_is_valid failed) without running anything inside a TEE:
       List every add_worker_type / del_worker_type (and proxy types) seen in the root
       contract history with its date, plus whether the hash is allowed right now.
 
+  models
+      List every add_model_type / del_model_type in the root history with its date, plus whether
+      the model hash is allowed right now.
+
+  model SPEC [SPEC ...]
+      Is this model allowed? SPEC is the full model string a worker runs,
+      <name>@<commit>:<verity hash> (worker.conf 'model'); the root stores SHA-256 of it.
+
   diff REFERENCE LOCAL
       Compare two image directories (or SHA256SUMS files) holding OVMF.fd,
       image.vmlinuz, image.initrd, image.cmdline, image.img, and report which TDX
@@ -114,6 +122,7 @@ def root_history(root, testnet, limit=1000):
     """Hash add/del operations from the root contract history, oldest first."""
     ops = {"cocoon_add_worker_type": ("worker", "add"), "cocoon_del_worker_type": ("worker", "del"),
            "cocoon_add_proxy_type": ("proxy", "add"), "cocoon_del_proxy_type": ("proxy", "del"),
+           "cocoon_add_model_type": ("model", "add"), "cocoon_del_model_type": ("model", "del"),
            "cocoon_upgrade_full": ("all", "reset"), "cocoon_reset_root": ("all", "reset")}
     out, before = [], None
     while len(out) < limit:
@@ -130,7 +139,7 @@ def root_history(root, testnet, limit=1000):
                 continue
             kind, action = ops[op]
             body = m.get("decoded_body") or {}
-            h = body.get("worker_hash") or body.get("proxy_hash")
+            h = body.get("worker_hash") or body.get("proxy_hash") or body.get("model_hash")
             out.append({"time": datetime.datetime.fromtimestamp(t["utime"], datetime.timezone.utc)
                         .strftime("%Y-%m-%d %H:%M UTC"), "kind": kind, "action": action,
                         "hash": f"{int(h):064x}" if h is not None else None})
@@ -182,7 +191,7 @@ def cmd_allowed(a):
     now = {}
     for x in hist:
         if x["hash"] and x["hash"] not in now:
-            method = "proxy_hash_is_valid" if x["kind"] == "proxy" else "worker_hash_is_valid"
+            method = {"proxy": "proxy_hash_is_valid", "model": "model_hash_is_valid"}.get(x["kind"], "worker_hash_is_valid")
             now[x["hash"]] = get_method_bool(a.root, method, x["hash"], a.testnet)
             time.sleep(1.1)
     print(f"root {a.root} ({'testnet' if a.testnet else 'mainnet'}): hash operations, oldest first")
@@ -193,6 +202,44 @@ def cmd_allowed(a):
         flag = "allowed now" if now.get(x["hash"]) else "not allowed now"
         print(f"{x['time']}  {x['action']:3} {x['kind']:6} {x['hash']}  {flag}")
     return 0
+
+
+def model_hash(spec):
+    """Root model hash: SHA-256 of the full model string the worker runs, "<name>@<commit>:<verity hash>"
+    (runners use td::sha256_bits256(model_name))."""
+    return hashlib.sha256(spec.encode()).hexdigest()
+
+
+def cmd_models(a):
+    hist = [x for x in root_history(a.root, a.testnet) if x["kind"] in ("model", "all")]
+    print(f"root {a.root} ({'testnet' if a.testnet else 'mainnet'}): model operations, oldest first")
+    print("a model hash is SHA-256 of the full model string, e.g. Qwen/Qwen3-32B@<commit>:<verity hash>;")
+    print("check a string with: image-hash-check model '<name>@<commit>:<verity hash>'")
+    seen = {}
+    for x in hist:
+        if x["action"] == "reset":
+            print(f"{x['time']}  full upgrade / reset of root data (model list may have been replaced)")
+            continue
+        if x["hash"] not in seen:
+            seen[x["hash"]] = get_method_bool(a.root, "model_hash_is_valid", x["hash"], a.testnet)
+            time.sleep(1.1)
+        flag = "allowed now" if seen[x["hash"]] else "not allowed now"
+        print(f"{x['time']}  {x['action']:3} model  {x['hash']}  {flag}")
+    return 0
+
+
+def cmd_model(a):
+    rc = 0
+    for spec in a.specs:
+        if "@" not in spec or ":" not in spec.split("@", 1)[1]:
+            print(f"{spec}\n  expected <name>@<commit>:<verity hash> (the 'model' line of worker.conf, as built)")
+            rc = 1
+            continue
+        h = model_hash(spec)
+        ok = get_method_bool(a.root, "model_hash_is_valid", h, a.testnet)
+        print(f"{spec}\n  hash {h}\n  {'ALLOWED' if ok else 'NOT ALLOWED'} by root {a.root}")
+        rc = rc if ok else 1
+    return rc
 
 
 def read_side(path):
@@ -266,12 +313,16 @@ def main(argv=None):
     c.add_argument("hashes", nargs="+")
     c.add_argument("--json", action="store_true", help="print one JSON array instead of text")
     sub.add_parser("allowed", help="history of allowed image hashes")
+    sub.add_parser("models", help="history of allowed model hashes")
+    m = sub.add_parser("model", help="is this model string (name@commit:verity) allowed by the root contract")
+    m.add_argument("specs", nargs="+")
     d = sub.add_parser("diff", help="compare two image directories or SHA256SUMS files")
     d.add_argument("reference")
     d.add_argument("local")
     a = ap.parse_args(argv)
     try:
-        return {"check": cmd_check, "allowed": cmd_allowed, "diff": cmd_diff}[a.cmd](a)
+        return {"check": cmd_check, "allowed": cmd_allowed, "models": cmd_models, "model": cmd_model,
+                "diff": cmd_diff}[a.cmd](a)
     except (urllib.error.URLError, RuntimeError, ValueError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
