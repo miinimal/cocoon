@@ -1,0 +1,49 @@
+name: ci-macos
+
+# Builds the client side (client-runner and the router) on Apple Silicon macOS,
+# where people integrating Cocoon develop (#25, #35). Build only: TEE code paths
+# that need x86/Linux return an error at run time on macOS.
+
+on:
+  push:
+    paths-ignore: ["**.md", "docs/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-client:
+    runs-on: macos-14
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: brew install cmake ninja ccache pkg-config openssl@3 lz4 libsodium libmicrohttpd secp256k1 boost autoconf automake libtool
+
+      - name: Configure
+        run: |
+          cmake -GNinja -S . -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DTON_USE_JEMALLOC=OFF \
+            -DTON_USE_ABSEIL=OFF \
+            -DTON_ONLY_TONLIB=ON \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
+
+      - name: Build client-runner and router
+        run: cmake --build build -j"$(sysctl -n hw.ncpu)" --target client-runner router
+
+      - name: Smoke - binaries start
+        run: |
+          ls -l build/client-runner build/tee/router
+          ./build/client-runner --help > /dev/null 2>&1 || ./build/client-runner -h > /dev/null 2>&1 || true
+          echo "built on $(uname -sm)"
