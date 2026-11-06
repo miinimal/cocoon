@@ -83,6 +83,10 @@ cocoon-launch auto-builds models if needed when `--model` is specified.
 Run all components locally without VM or TON for fast iteration and debugging.
 
 ```bash
+# The TEE router needs AMD SEV certificate chains and CRLs (provided by sev-pki-update inside COCOON images);
+# outside the images fetch them once:
+sudo ./scripts/fetch-sev-pki /etc/tee/sev
+
 # Start all components (auto-builds on first run)
 ./scripts/cocoon-launch --local-all
 
@@ -151,7 +155,7 @@ You may want to create your own root smart contract for testing purposes. If you
 
 Note that you don't have to manually create proxy, worker and client's smart contracts. It is all handled automatically.
 
-**NB**: testnet is currently not supported, minor changes in spec are required.
+**NB**: to run on TON testnet use `--test --testnet`, see [testnet.md](testnet.md).
 
 You will have to put some TONs on worker, client and proxy accounts. See their HTTP stats for details.
 

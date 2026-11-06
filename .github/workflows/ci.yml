@@ -60,13 +60,16 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build -j"$(nproc)" --target cocoon-all test-validate-request test-prometheus-metrics
+        run: cmake --build build -j"$(nproc)" --target cocoon-all test-validate-request test-prometheus-metrics test-validate-tools
 
       - name: Unit tests - request validation
         run: ./build/test-validate-request
 
       - name: Unit tests - Prometheus metrics
         run: ./build/test-prometheus-metrics
+
+      - name: Unit tests - function calling and structured output (PR 80)
+        run: ./build/test-validate-tools
 
       - name: AMD SEV PKI for the router
         run: |

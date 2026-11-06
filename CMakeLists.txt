@@ -399,3 +399,8 @@ if(TARGET seal-server)
     list(APPEND COCOON_ALL_DEPS seal-server seal-client)
 endif()
 add_custom_target(cocoon-all DEPENDS ${COCOON_ALL_DEPS})
+
+# Regression tests for request validation (function calling, structured output)
+add_executable(test-validate-tools EXCLUDE_FROM_ALL test/test-validate-tools.cpp)
+target_include_directories(test-validate-tools PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(test-validate-tools PRIVATE cocoon_common)
