@@ -1,0 +1,148 @@
+name: ci
+
+# Builds COCOON on a GitHub-hosted runner and checks it without TEE or TON:
+#  - unit tests for OpenAI request validation;
+#  - the whole network on one machine (scripts/cocoon-launch --local-all, fake TON):
+#    client -> router -> proxy -> worker -> OpenAI-compatible stub and back, with token
+#    accounting; streamed completions are checked too and reported as the known issue #49.
+
+on:
+  push:
+    paths-ignore: ["**.md", "docs/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang cmake ninja-build pkg-config ccache jq \
+            libssl-dev zlib1g-dev liblz4-dev libsodium-dev libjemalloc-dev \
+            libmicrohttpd-dev libboost-thread-dev libsecp256k1-dev
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-ci-x86-64-v2-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-ci-x86-64-v2-${{ runner.os }}-
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -GNinja -S . -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DTON_USE_JEMALLOC=ON \
+            -DTON_USE_ABSEIL=OFF \
+            -DTON_ONLY_TONLIB=ON \
+            -DTON_USE_ROCKSDB=ON \
+            -DCOCOON_ARCH=x86-64-v2 -DTON_ARCH=x86-64-v2 -DPORTABLE=x86-64-v2 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)" --target cocoon-all test-validate-request
+
+      - name: Unit tests - request validation
+        run: ./build/test-validate-request
+
+      - name: AMD SEV PKI for the router
+        run: |
+          # the router loads the AMD SEV certificate chains at start even when no SEV peer is used
+          sudo mkdir -p /etc/tee/sev
+          for product in Milan Genoa Turin; do
+            for attempt in 1 2 3 4 5; do
+              if sudo curl -fsSL "https://kdsintf.amd.com/vcek/v1/$product/cert_chain" -o "/etc/tee/sev/$product.cert_chain.pem" \
+                 && curl -fsSL "https://kdsintf.amd.com/vcek/v1/$product/crl" -o "/tmp/$product.crl"; then
+                break
+              fi
+              sleep $((attempt * 10))
+            done
+            sudo openssl crl -inform DER -in "/tmp/$product.crl" -outform PEM -out "/etc/tee/sev/$product.cert_chain_crl.pem"
+          done
+          ls -l /etc/tee/sev
+
+      - name: Start the whole network locally (fake TON)
+        run: |
+          python3 test/openai-backend-stub.py --port 8000 --model Qwen/Qwen3-8B > /tmp/backend.log 2>&1 &
+          ./scripts/cocoon-launch --local-all --skip-build --build-dir build > /tmp/local-all.log 2>&1 &
+          up=0
+          for i in $(seq 1 40); do
+            sleep 3
+            curl -sf -m 5 http://127.0.0.1:10000/stats > /dev/null && { up=1; break; }
+          done
+          [ "$up" = 1 ] || { echo "::error::client did not come up"; exit 1; }
+          # the client is up before the worker has registered with the proxy
+          for i in $(seq 1 60); do
+            if curl -s -m 5 http://127.0.0.1:10000/v1/models | jq -e '.data | length > 0' > /dev/null 2>&1; then
+              echo "models ready after $((i * 3))s"; exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::no model became available"; exit 1
+
+      - name: End to end - chat completion through client, proxy and worker
+        run: |
+          curl -s -m 60 http://127.0.0.1:10000/v1/chat/completions -H 'Content-Type: application/json' \
+            -d '{"model":"Qwen/Qwen3-8B","max_tokens":32,"messages":[{"role":"user","content":"ping-plain"}]}' > /tmp/chat.json
+          head -c 800 /tmp/chat.json; echo
+          jq -e '.choices[0].message.content | test("received: ping-plain")' /tmp/chat.json > /dev/null \
+            || { echo "::error::plain request did not pass through the network"; exit 1; }
+          jq -e '.usage.total_tokens > 0' /tmp/chat.json > /dev/null || { echo "::error::no usage accounting"; exit 1; }
+
+      - name: End to end - invalid request is rejected
+        run: |
+          code=$(curl -s -o /tmp/bad.json -w '%{http_code}' -m 30 http://127.0.0.1:10000/v1/chat/completions \
+            -H 'Content-Type: application/json' -d '{"model":"Qwen/Qwen3-8B","messages":[{"role":"robot","content":"x"}]}')
+          echo "HTTP $code: $(head -c 300 /tmp/bad.json)"
+          [ "$code" -ge 400 ] || { echo "::error::request with an unknown role was not rejected"; exit 1; }
+
+      - name: "End to end - streamed chat completion (known issue cocoon#49, fix in #63)"
+        # Expected to fail until the worker answer postprocessor understands SSE: the stream
+        # reaches the worker but the client receives an empty body. Remove continue-on-error
+        # once the fix is merged.
+        continue-on-error: true
+        run: |
+          curl -s -N -m 60 -D /tmp/stream.headers http://127.0.0.1:10000/v1/chat/completions -H 'Content-Type: application/json' \
+            -d '{"model":"Qwen/Qwen3-8B","max_tokens":32,"stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"ping-stream"}]}' > /tmp/stream.txt
+          echo "--- response headers"; cat /tmp/stream.headers
+          echo "--- body ($(wc -c < /tmp/stream.txt) bytes)"; head -c 1500 /tmp/stream.txt; echo
+          echo "--- worker log about the answer"; grep -a "unprocessed data in answer" /tmp/local-all.log | tail -3 || true
+          grep -q '^data: ' /tmp/stream.txt || { echo "::error::stream has no SSE data lines (cocoon#49)"; exit 1; }
+          [ "$(grep -v '^$' /tmp/stream.txt | tail -1 | tr -d '\r')" = "data: [DONE]" ] || { echo "::error::stream does not end with data: [DONE]"; exit 1; }
+          text=$(grep '^data: {' /tmp/stream.txt | sed 's/^data: //' | jq -rj '.choices[0].delta.content // empty')
+          echo "reassembled: $text"
+          echo "$text" | grep -q "received: ping-stream" || { echo "::error::streamed content does not reassemble to the reply"; exit 1; }
+
+      - name: Logs
+        if: always()
+        run: |
+          echo "--- backend"; tail -30 /tmp/backend.log || true
+          echo "--- local network (last 150 lines)"; tail -150 /tmp/local-all.log || true
+
+      - name: Stop local network
+        if: always()
+        run: |
+          pkill -f cocoon-launch || true
+          pkill -f -- '-runner --config' || true
+          pkill -f tee/router || true
+          pkill -f openai-backend-stub || true
