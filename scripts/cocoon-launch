@@ -582,6 +582,25 @@ def run_client_local(cfg: Config):
         router_proc.wait()
 
 
+IMAGE_FILES = ('OVMF.fd', 'image.vmlinuz', 'image.initrd', 'image.cmdline', 'image.img')
+
+
+def check_image_dir(image_dir: str, test: bool) -> None:
+    """Exit with a clear message when the TEE image files are missing (instead of a traceback on image.cmdline)."""
+    d = Path(image_dir)
+    missing = [f for f in IMAGE_FILES if not (d / f).exists()]
+    if not missing:
+        return
+    lines = [f'ERROR: TEE image files missing in {d}: {", ".join(missing)}']
+    if test:
+        lines.append('  The distributed worker release contains only the prod image; a test image is built locally:')
+        lines.append('  ./scripts/build-image test   (or run without --test to use images/prod)')
+    else:
+        lines.append('  Use the image directory from the release archive (images/prod), or build it: ./scripts/build-image prod')
+    lines.append('  A different image directory can be given with --image-dir.')
+    sys.exit('\n'.join(lines))
+
+
 def run_qemu(cfg: Config):
     """Run worker/proxy in QEMU/TEE"""
     # Verify GPU
@@ -624,6 +643,8 @@ def run_qemu(cfg: Config):
         for guestfwd_port in cfg.guestfwd_ports:
             netdev += f',guestfwd=tcp::{guestfwd_port}-tcp:{cfg.guestfwd_ip}:{guestfwd_port}'
 
+
+    check_image_dir(cfg.image_dir, cfg.test)
 
     # Read cmdline
     cmdline_file = Path(cfg.image_dir) / 'image.cmdline'
