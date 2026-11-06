@@ -5,7 +5,7 @@ Check a COCOON TEE image hash against the root contract, and explain image misma
 Answers the question "why is my worker not accepted" (has_worker_hash /
 worker_hash_is_valid failed) without running anything inside a TEE:
 
-  check HASH [HASH ...]
+  check [--json] HASH [HASH ...]
       Ask the root contract (worker_hash_is_valid / proxy_hash_is_valid get methods)
       whether each TEE_IMAGE_HASH is allowed. HASH may be hex, base64 or decimal.
       Also shows when an allowed hash was added, from the root transaction history.
@@ -149,16 +149,21 @@ def cmd_check(a):
     except Exception as e:  # noqa: BLE001
         print(f"note: root history unavailable ({e}); answering from get methods only", file=sys.stderr)
     rc = 0
+    results = []
     for raw in a.hashes:
         h = parse_hash(raw)
         w = get_method_bool(a.root, "worker_hash_is_valid", h, a.testnet)
         p = get_method_bool(a.root, "proxy_hash_is_valid", h, a.testnet)
         added = [x["time"] for x in hist if x["hash"] == h and x["action"] == "add"]
+        rc = rc if (w or p) else 1
+        if a.json:
+            results.append({"hash": h, "hash_b64": as_b64(h), "allowed_worker": w, "allowed_proxy": p,
+                            "added": added, "root": a.root, "network": "testnet" if a.testnet else "mainnet"})
+            continue
         status = "ALLOWED as worker image" if w else "ALLOWED as proxy image" if p else "NOT ALLOWED"
         print(f"{h}  ({as_b64(h)})")
         print(f"  {status} by root {a.root}" + (f"; added {', '.join(added)}" if added else ""))
         if not (w or p):
-            rc = 1
             if added:
                 print("  it was added before but is no longer allowed (removed or reset by a root upgrade)")
             else:
@@ -167,6 +172,8 @@ def cmd_check(a):
                     print(f"  never added; last worker image added {last[-1]['time']}: {last[-1]['hash']}")
                 print("  your image measures differently from every allowed image: compare your image files with")
                 print("  the release you expect using 'diff', or ask the root owner to add this hash")
+    if a.json:
+        print(json.dumps(results, indent=2))
     return rc
 
 
@@ -257,6 +264,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check", help="is this TEE_IMAGE_HASH allowed by the root contract")
     c.add_argument("hashes", nargs="+")
+    c.add_argument("--json", action="store_true", help="print one JSON array instead of text")
     sub.add_parser("allowed", help="history of allowed image hashes")
     d = sub.add_parser("diff", help="compare two image directories or SHA256SUMS files")
     d.add_argument("reference")
