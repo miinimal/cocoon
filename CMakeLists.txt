@@ -383,6 +383,11 @@ target_link_libraries(generate-cocoon-wallet-address PRIVATE cocoon_common )
 
 add_custom_target(runners DEPENDS client-runner proxy-runner worker-runner key-manager-runner sync-time generate-cocoon-wallet-address)
 
+# Request validation regression tests (not part of cocoon-all)
+add_executable(test-validate-request EXCLUDE_FROM_ALL test/test-validate-request.cpp)
+target_include_directories(test-validate-request PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(test-validate-request PRIVATE cocoon_common)
+
 # Build everything needed for cocoon-launch
 set(COCOON_ALL_DEPS runners cocoon-subst router gen-cert)
 # Add seal targets only if SGX is available
