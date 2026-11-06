@@ -60,10 +60,13 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build -j"$(nproc)" --target cocoon-all test-validate-request
+        run: cmake --build build -j"$(nproc)" --target cocoon-all test-validate-request test-health-stats
 
       - name: Unit tests - request validation
         run: ./build/test-validate-request
+
+      - name: Unit tests - health-monitor stats
+        run: ./build/test-health-stats
 
       - name: AMD SEV PKI for the router
         run: |

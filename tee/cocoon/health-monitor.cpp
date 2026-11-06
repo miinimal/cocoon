@@ -431,6 +431,7 @@ class Server final : public td::actor::Actor {
     for (const auto& [iface, io] : m.net_io) {
       stats_.update_network(iface, io.first, io.second);
     }
+    stats_.retain(m.disk_io, m.net_io);
 
     // Update per-service stats
     for (const auto& svc : MONITORED_SERVICES) {

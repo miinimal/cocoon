@@ -165,6 +165,25 @@ std::array<IoRateTracker::Rates, 3> StatsCollector::get_net_rates(const std::str
   return it != net_.end() ? it->second.get_rates() : std::array<IoRateTracker::Rates, 3>{};
 }
 
+namespace {
+template <class Trackers>
+void retain_keys(Trackers& trackers, const std::map<std::string, std::pair<uint64_t, uint64_t>>& present) {
+  for (auto it = trackers.begin(); it != trackers.end();) {
+    if (present.count(it->first) == 0) {
+      it = trackers.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+}  // namespace
+
+void StatsCollector::retain(const std::map<std::string, std::pair<uint64_t, uint64_t>>& disks,
+                            const std::map<std::string, std::pair<uint64_t, uint64_t>>& ifaces) {
+  retain_keys(disk_, disks);
+  retain_keys(net_, ifaces);
+}
+
 bool StatsCollector::has_disk(const std::string& device) const {
   return disk_.count(device) > 0;
 }

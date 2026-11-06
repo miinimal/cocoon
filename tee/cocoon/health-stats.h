@@ -11,6 +11,7 @@
 #include <array>
 #include <map>
 #include <string>
+#include <utility>
 #include <algorithm>
 
 namespace cocoon {
@@ -92,6 +93,11 @@ class StatsCollector {
   std::array<IoRateTracker::Rates, 3> get_net_rates(const std::string& iface) const;
   std::array<double, 3> get_service_cpu(const std::string& service) const;
   std::array<IoRateTracker::Rates, 3> get_service_io(const std::string& service) const;
+
+  // Drops trackers of disks and interfaces that are no longer reported, so devices that come and go
+  // (veth pairs, dynamic volumes) do not accumulate history forever.
+  void retain(const std::map<std::string, std::pair<uint64_t, uint64_t>>& disks,
+              const std::map<std::string, std::pair<uint64_t, uint64_t>>& ifaces);
 
   bool has_disk(const std::string& device) const;
   bool has_network(const std::string& iface) const;
