@@ -1,6 +1,12 @@
 #include "tee/cocoon/sev/UUID.h"
 
+#if defined(__APPLE__)
+#include <libkern/OSByteOrder.h>
+#define bswap_16 OSSwapInt16
+#define bswap_32 OSSwapInt32
+#else
 #include <byteswap.h>
+#endif
 
 #include "td/utils/Slice-decl.h"
 

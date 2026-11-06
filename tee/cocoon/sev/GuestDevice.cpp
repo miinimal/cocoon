@@ -1,17 +1,22 @@
 #include "tee/cocoon/sev/GuestDevice.h"
 
-#include <fcntl.h>
-#include <linux/sev-guest.h>
-#include <sys/ioctl.h>
-
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
 
+#if defined(__linux__)
+#include <fcntl.h>
+#include <linux/sev-guest.h>
+#include <sys/ioctl.h>
+
 #include "td/utils/crypto.h"
+#endif
+
+#include "td/utils/misc.h"
 
 namespace sev {
 
+#if defined(__linux__)
 namespace {
 
 td::Result<std::vector<sev::GuestDevice::CertTableEntry>> parse_cert_table(const std::byte* buffer, size_t size) {
@@ -74,16 +79,22 @@ td::Result<GuestDevice> GuestDevice::open() {
 
   return GuestDevice(std::move(fd));
 }
+#else
+td::Result<GuestDevice> GuestDevice::open() {
+  return td::Status::Error("SEV guest device is only supported on Linux");
+}
+#endif
 
 GuestDevice::~GuestDevice() {
   if (fd_.get() != -1) {
     if (::close(fd_.get()) == -1) {
       const auto saved_errno = errno;
-      LOG(FATAL) << "cannot close GuestDevice: " << strerrordesc_np(saved_errno);
+      LOG(FATAL) << "cannot close GuestDevice: " << strerror(saved_errno);
     }
   }
 }
 
+#if defined(__linux__)
 td::Result<AttestationReport> GuestDevice::get_report(const td::UInt512& user_claims_hash) const {
   snp_report_req req = {};
   memcpy(req.user_data, user_claims_hash.raw, sizeof(req.user_data));
@@ -106,7 +117,13 @@ td::Result<AttestationReport> GuestDevice::get_report(const td::UInt512& user_cl
 
   return resp.msg_report_rsp.report;
 }
+#else
+td::Result<AttestationReport> GuestDevice::get_report(const td::UInt512& user_claims_hash) const {
+  return td::Status::Error("SEV guest reports are only supported on Linux");
+}
+#endif
 
+#if defined(__linux__)
 td::Result<std::pair<AttestationReport, std::vector<GuestDevice::CertTableEntry>>> GuestDevice::get_extended_report(
     const td::UInt512& user_claims_hash) const {
   // Certificate storage must be paged aligned and not exceed SEV_FW_BLOB_MAX_SIZE.
@@ -139,7 +156,14 @@ td::Result<std::pair<AttestationReport, std::vector<GuestDevice::CertTableEntry>
 
   return std::make_pair(resp.msg_report_rsp.report, std::move(cert_table));
 }
+#else
+td::Result<std::pair<AttestationReport, std::vector<GuestDevice::CertTableEntry>>> GuestDevice::get_extended_report(
+    const td::UInt512& user_claims_hash) const {
+  return td::Status::Error("SEV extended guest reports are only supported on Linux");
+}
+#endif
 
+#if defined(__linux__)
 td::Result<td::UInt256> GuestDevice::get_derived_key(td::Slice name) const {
   snp_derived_key_req req = {};
 
@@ -160,5 +184,10 @@ td::Result<td::UInt256> GuestDevice::get_derived_key(td::Slice name) const {
 
   return key;
 }
+#else
+td::Result<td::UInt256> GuestDevice::get_derived_key(td::Slice name) const {
+  return td::Status::Error("SEV derived keys are only supported on Linux");
+}
+#endif
 
 }  // namespace sev
