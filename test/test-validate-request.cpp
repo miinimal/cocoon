@@ -73,6 +73,7 @@ int main() {
               true);
   expect_chat("stream with usage", "{" + kBase + R"(,"stream":true,"stream_options":{"include_usage":true}})", true);
   expect_chat("reasoning_effort", "{" + kBase + R"(,"reasoning_effort":"low"})", true);
+  expect_chat("service_tier is a string as in the OpenAI API", "{" + kBase + R"(,"service_tier":"auto"})", true);
   expect("completions endpoint", "/v1/completions", "{" + kModel + R"(,"prompt":"hello"})", true);
 
   // values returned to the caller
@@ -99,6 +100,7 @@ int main() {
   expect_chat("unknown top-level field", "{" + kBase + R"(,"definitely_not_openai":1})", false);
   expect_chat("temperature of wrong type", "{" + kBase + R"(,"temperature":"hot"})", false);
   expect_chat("stream of wrong type", "{" + kBase + R"(,"stream":"yes"})", false);
+  expect_chat("service_tier of wrong type", "{" + kBase + R"(,"service_tier":1})", false);
   expect("unsupported endpoint", "/v1/embeddings", "{" + kModel + R"(,"input":"x"})", false);
 
   std::printf(failures ? "%d test(s) FAILED\n" : "all tests passed\n", failures);

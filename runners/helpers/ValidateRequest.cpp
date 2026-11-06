@@ -1123,7 +1123,7 @@ static td::Status process_chat_completions(Ctx &ctx) {
   }));
   TRY_STATUS(ctx.process_obj_field("safety_identifier", false, process_string));
   TRY_STATUS(ctx.process_obj_field("seed", false, process_integer));
-  TRY_STATUS(ctx.process_obj_field("service_tier", false, process_integer));
+  TRY_STATUS(ctx.process_obj_field("service_tier", false, process_string));
   TRY_STATUS(ctx.process_obj_field("stop", false, [](Ctx &ctx) {
     TRY_STATUS(ctx.process_array(false, process_string));
     return td::Status::OK();

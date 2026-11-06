@@ -311,7 +311,7 @@ set(COMMON_SOURCE
  runners/BaseRunner.cpp runners/smartcontracts/RootContractConfig.cpp runners/smartcontracts/SmartContract.cpp net/TcpConnection.cpp net/TcpClient.cpp 
  runners/smartcontracts/CocoonWallet.cpp runners/smartcontracts/ProxyContract.cpp runners/smartcontracts/ClientContract.cpp 
  runners/smartcontracts/WorkerContract.cpp runners/helpers/CountTokens.cpp runners/helpers/HttpSender.cpp runners/TonlibWrapper.cpp
- runners/helpers/ValidateRequest.cpp
+ runners/helpers/ValidateRequest.cpp runners/helpers/PrometheusMetrics.cpp
 
  boost-http/http.cpp
  boost-http/http-client.cpp
@@ -387,6 +387,10 @@ add_custom_target(runners DEPENDS client-runner proxy-runner worker-runner key-m
 add_executable(test-validate-request EXCLUDE_FROM_ALL test/test-validate-request.cpp)
 target_include_directories(test-validate-request PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test-validate-request PRIVATE cocoon_common)
+
+add_executable(test-prometheus-metrics EXCLUDE_FROM_ALL test/test-prometheus-metrics.cpp)
+target_include_directories(test-prometheus-metrics PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(test-prometheus-metrics PRIVATE cocoon_common)
 
 # Build everything needed for cocoon-launch
 set(COCOON_ALL_DEPS runners cocoon-subst router gen-cert)

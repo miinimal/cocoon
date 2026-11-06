@@ -60,10 +60,13 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build -j"$(nproc)" --target cocoon-all test-validate-request
+        run: cmake --build build -j"$(nproc)" --target cocoon-all test-validate-request test-prometheus-metrics
 
       - name: Unit tests - request validation
         run: ./build/test-validate-request
+
+      - name: Unit tests - Prometheus metrics
+        run: ./build/test-prometheus-metrics
 
       - name: AMD SEV PKI for the router
         run: |
@@ -115,6 +118,21 @@ jobs:
             -H 'Content-Type: application/json' -d '{"model":"Qwen/Qwen3-8B","messages":[{"role":"robot","content":"x"}]}')
           echo "HTTP $code: $(head -c 300 /tmp/bad.json)"
           [ "$code" -ge 400 ] || { echo "::error::request with an unknown role was not rejected"; exit 1; }
+
+      - name: End to end - /metrics on every runner that serves /jsonstats
+        run: |
+          checked=0
+          for port in 10000 11000 12000 13000; do
+            curl -sf -m 10 "http://127.0.0.1:$port/jsonstats" > /dev/null || { echo "port $port: no /jsonstats, skipped"; continue; }
+            curl -sf -m 10 -D /tmp/metrics.h "http://127.0.0.1:$port/metrics" > /tmp/metrics.txt \
+              || { echo "::error::port $port serves /jsonstats but not /metrics"; exit 1; }
+            grep -qi '^content-type: text/plain; version=0.0.4' /tmp/metrics.h || { echo "::error::port $port: wrong content type"; exit 1; }
+            grep -q '_build_info{git_commit="' /tmp/metrics.txt || { echo "::error::port $port: no build_info"; exit 1; }
+            grep -q '_metrics_error' /tmp/metrics.txt && { echo "::error::port $port: stats JSON did not parse"; exit 1; }
+            echo "port $port: $(grep -c '^# TYPE' /tmp/metrics.txt) metrics"; grep -E '_total |build_info' /tmp/metrics.txt | head -4
+            checked=$((checked + 1))
+          done
+          [ "$checked" -ge 2 ] || { echo "::error::fewer than two runners checked"; exit 1; }
 
       - name: "End to end - streamed chat completion (known issue cocoon#49, fix in #63)"
         # Expected to fail until the worker answer postprocessor understands SSE: the stream

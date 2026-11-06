@@ -324,7 +324,6 @@ td::Status VCEKCertificate::verify_signature(const ECDSASignature& signature, td
     return td::Status::Error("Cannot i2d_ECDSA_SIG");
   }
   CHECK(static_cast<size_t> (siglen) <= raw_signature.size());
-  LOG(INFO) << "XXX:" << td::format::as_hex_dump<0>(td::Slice(raw_signature.data(), raw_signature.size()));
 
   EVP_PKEY* pkey = X509_get0_pubkey(x509_.get());
   OPENSSL_MAKE_PTR (pkey_ctx, EVP_PKEY_CTX_new (pkey, nullptr), EVP_PKEY_CTX_free, "Cannot create EVP_PKEY_CTX");

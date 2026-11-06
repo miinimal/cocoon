@@ -1,4 +1,5 @@
 #include "KeyManagerRunner.hpp"
+#include "runners/helpers/PrometheusMetrics.h"
 
 #include "Ed25519.h"
 #include "common/bitstring.h"
@@ -126,6 +127,14 @@ void KeyManagerRunner::custom_initialize(td::Promise<td::Unit> promise) {
           std::string path, std::vector<std::pair<std::string, std::string>> args, std::string body,
           std::unique_ptr<http::HttpRequestCallback> answer_callback) {
         http_send_static_answer(http_generate_json_stats(), std::move(answer_callback), "application/json");
+      });
+  register_custom_http_handler(
+      "/metrics",
+      [&](http::HttpCallback::RequestType request_type, std::vector<std::pair<std::string, std::string>> headers,
+          std::string path, std::vector<std::pair<std::string, std::string>> args, std::string body,
+          std::unique_ptr<http::HttpRequestCallback> answer_callback) {
+        http_send_static_answer(json_stats_to_prometheus(http_generate_json_stats(), "cocoon_key_manager"),
+                                std::move(answer_callback), "text/plain; version=0.0.4; charset=utf-8");
       });
   register_custom_http_handler(
       "/request/removekey",
