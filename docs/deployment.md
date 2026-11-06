@@ -28,6 +28,8 @@ dmesg | grep -i tdx
 **Setup GPU:**
 - Use [`scripts/setup-gpu-vfio`](../scripts/setup-gpu-vfio) to configure GPU for passthrough
 
+Common setup errors and their fixes are collected in [troubleshooting.md](troubleshooting.md).
+
 ## Quick Start
 
 If you want just to run a worker, please see [readme](../README.md). The following instructions are mostly for developers.
