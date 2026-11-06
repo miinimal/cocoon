@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""
+Check a COCOON TEE image hash against the root contract, and explain image mismatches.
+
+Answers the question "why is my worker not accepted" (has_worker_hash /
+worker_hash_is_valid failed) without running anything inside a TEE:
+
+  check HASH [HASH ...]
+      Ask the root contract (worker_hash_is_valid / proxy_hash_is_valid get methods)
+      whether each TEE_IMAGE_HASH is allowed. HASH may be hex, base64 or decimal.
+      Also shows when an allowed hash was added, from the root transaction history.
+
+  allowed
+      List every add_worker_type / del_worker_type (and proxy types) seen in the root
+      contract history with its date, plus whether the hash is allowed right now.
+
+  diff REFERENCE LOCAL
+      Compare two image directories (or SHA256SUMS files) holding OVMF.fd,
+      image.vmlinuz, image.initrd, image.cmdline, image.img, and report which TDX
+      measurement register each difference changes, including the dm-verity roothash
+      inside image.cmdline.
+
+TEE_IMAGE_HASH is sha256 over the TDX measurements with REPORTDATA zeroed
+(tee/cocoon/tdx/tdx.cpp: image_hash), so it changes when any of these change:
+  MRTD  <- OVMF.fd (TD firmware)
+  RTMR0 <- firmware configuration (TD HOB/ACPI tables: vCPU count, memory size, devices)
+  RTMR1 <- image.vmlinuz, image.initrd
+  RTMR2 <- image.cmdline (contains roothash=, the dm-verity root of image.img)
+Only the root contract owner can add a hash; this tool only reads.
+
+Network: toncenter v3 for get methods, tonapi v2 for the decoded history.
+Python 3.8+, standard library only.
+"""
+
+import argparse
+import base64
+import datetime
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+
+MAINNET_ROOT = "EQCns7bYSp0igFvS1wpb5wsZjCKCV19MD5AVzI4EyxsnU73k"
+TONCENTER = {False: "https://toncenter.com/api/v3", True: "https://testnet.toncenter.com/api/v3"}
+TONAPI = {False: "https://tonapi.io/v2", True: "https://testnet.tonapi.io/v2"}
+UA = {"User-Agent": "cocoon-image-hash-check/1", "Content-Type": "application/json"}
+
+IMAGE_FILES = [
+    ("OVMF.fd", "MRTD", "TD firmware"),
+    ("image.vmlinuz", "RTMR1", "kernel"),
+    ("image.initrd", "RTMR1", "initrd"),
+    ("image.cmdline", "RTMR2", "kernel command line"),
+    ("image.img", "RTMR2 (via roothash in image.cmdline)", "root filesystem"),
+]
+
+
+# ---------------------------------------------------------------- hashes
+
+def parse_hash(text):
+    """Return a 64-char lowercase hex string for a hex, base64 or decimal 256-bit value."""
+    t = text.strip()
+    if t.lower().startswith("0x"):
+        t = t[2:]
+    if re.fullmatch(r"[0-9a-fA-F]{64}", t):
+        return t.lower()
+    if re.fullmatch(r"[0-9]{1,78}", t):
+        n = int(t)
+        if n < 1 << 256:
+            return f"{n:064x}"
+    try:
+        raw = base64.b64decode(t + "=" * (-len(t) % 4), validate=True)
+        if len(raw) == 32:
+            return raw.hex()
+    except Exception:  # noqa: BLE001
+        pass
+    raise ValueError(f"not a 256-bit hash (hex, base64 or decimal): {text!r}")
+
+
+def as_b64(hex_hash):
+    return base64.b64encode(bytes.fromhex(hex_hash)).decode()
+
+
+# ---------------------------------------------------------------- network
+
+def http_json(url, body=None, timeout=30, attempts=6):
+    """GET or POST JSON; public endpoints without an API key allow about one request per
+    second, so 429 and transient 5xx answers are retried with a growing pause."""
+    data = json.dumps(body).encode() if body is not None else None
+    for i in range(attempts):
+        req = urllib.request.Request(url, data=data, headers=UA)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code not in (429, 500, 502, 503, 504) or i == attempts - 1:
+                raise
+        time.sleep(1.2 * (i + 1))
+
+
+def get_method_bool(root, method, hex_hash, testnet):
+    r = http_json(f"{TONCENTER[testnet]}/runGetMethod",
+                  {"address": root, "method": method, "stack": [{"type": "num", "value": "0x" + hex_hash}]})
+    if r.get("exit_code") not in (0, 1):
+        raise RuntimeError(f"{method} exit code {r.get('exit_code')}")
+    v = r["stack"][0]["value"]
+    return int(v, 16) != 0
+
+
+def root_history(root, testnet, limit=1000):
+    """Hash add/del operations from the root contract history, oldest first."""
+    ops = {"cocoon_add_worker_type": ("worker", "add"), "cocoon_del_worker_type": ("worker", "del"),
+           "cocoon_add_proxy_type": ("proxy", "add"), "cocoon_del_proxy_type": ("proxy", "del"),
+           "cocoon_upgrade_full": ("all", "reset"), "cocoon_reset_root": ("all", "reset")}
+    out, before = [], None
+    while len(out) < limit:
+        url = f"{TONAPI[testnet]}/blockchain/accounts/{root}/transactions?limit=100"
+        if before:
+            url += f"&before_lt={before}"
+        page = http_json(url).get("transactions", [])
+        if not page:
+            break
+        for t in page:
+            m = t.get("in_msg") or {}
+            op = m.get("decoded_op_name")
+            if op not in ops or not t.get("success", True):
+                continue
+            kind, action = ops[op]
+            body = m.get("decoded_body") or {}
+            h = body.get("worker_hash") or body.get("proxy_hash")
+            out.append({"time": datetime.datetime.fromtimestamp(t["utime"], datetime.timezone.utc)
+                        .strftime("%Y-%m-%d %H:%M UTC"), "kind": kind, "action": action,
+                        "hash": f"{int(h):064x}" if h is not None else None})
+        before = page[-1]["lt"]
+        if len(page) < 100:
+            break
+    return list(reversed(out))
+
+
+# ---------------------------------------------------------------- commands
+
+def cmd_check(a):
+    hist = []
+    try:
+        hist = root_history(a.root, a.testnet)
+    except Exception as e:  # noqa: BLE001
+        print(f"note: root history unavailable ({e}); answering from get methods only", file=sys.stderr)
+    rc = 0
+    for raw in a.hashes:
+        h = parse_hash(raw)
+        w = get_method_bool(a.root, "worker_hash_is_valid", h, a.testnet)
+        p = get_method_bool(a.root, "proxy_hash_is_valid", h, a.testnet)
+        added = [x["time"] for x in hist if x["hash"] == h and x["action"] == "add"]
+        status = "ALLOWED as worker image" if w else "ALLOWED as proxy image" if p else "NOT ALLOWED"
+        print(f"{h}  ({as_b64(h)})")
+        print(f"  {status} by root {a.root}" + (f"; added {', '.join(added)}" if added else ""))
+        if not (w or p):
+            rc = 1
+            if added:
+                print("  it was added before but is no longer allowed (removed or reset by a root upgrade)")
+            else:
+                last = [x for x in hist if x["kind"] == "worker" and x["action"] == "add"]
+                if last:
+                    print(f"  never added; last worker image added {last[-1]['time']}: {last[-1]['hash']}")
+                print("  your image measures differently from every allowed image: compare your image files with")
+                print("  the release you expect using 'diff', or ask the root owner to add this hash")
+    return rc
+
+
+def cmd_allowed(a):
+    hist = root_history(a.root, a.testnet)
+    now = {}
+    for x in hist:
+        if x["hash"] and x["hash"] not in now:
+            method = "proxy_hash_is_valid" if x["kind"] == "proxy" else "worker_hash_is_valid"
+            now[x["hash"]] = get_method_bool(a.root, method, x["hash"], a.testnet)
+            time.sleep(1.1)
+    print(f"root {a.root} ({'testnet' if a.testnet else 'mainnet'}): hash operations, oldest first")
+    for x in hist:
+        if x["action"] == "reset":
+            print(f"{x['time']}  full upgrade / reset of root data (hash lists may have been replaced)")
+            continue
+        flag = "allowed now" if now.get(x["hash"]) else "not allowed now"
+        print(f"{x['time']}  {x['action']:3} {x['kind']:6} {x['hash']}  {flag}")
+    return 0
+
+
+def read_side(path):
+    """Map file name -> sha256 hex, from a directory or a SHA256SUMS-style file; also the cmdline text
+    (full text for a directory, only the roothash for a SHA256SUMS file) and whether it is the full text."""
+    sums, cmdline, full = {}, None, os.path.isdir(path)
+    if os.path.isdir(path):
+        for name, _, _ in IMAGE_FILES:
+            p = os.path.join(path, name)
+            if os.path.exists(p):
+                h = hashlib.sha256()
+                with open(p, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                sums[name] = h.hexdigest()
+        p = os.path.join(path, "image.cmdline")
+        if os.path.exists(p):
+            cmdline = open(p, encoding="utf-8", errors="replace").read()
+    else:
+        for line in open(path, encoding="utf-8"):
+            m = re.match(r"\s*([0-9a-fA-F]{64})\s+\*?(\S+)", line)
+            if m:
+                sums[os.path.basename(m.group(2))] = m.group(1).lower()
+            m = re.search(r"roothash=([0-9a-fA-F]{64})", line)
+            if m:
+                cmdline = (cmdline or "") + f" roothash={m.group(1)}"
+    return sums, cmdline, full
+
+
+def cmd_diff(a):
+    ref, ref_cmd, ref_full = read_side(a.reference)
+    loc, loc_cmd, loc_full = read_side(a.local)
+    changed = set()
+    print(f"{'file':15} {'register':38} result")
+    for name, reg, what in IMAGE_FILES:
+        r, l = ref.get(name), loc.get(name)
+        if r is None or l is None:
+            res = "missing on " + ("both sides" if r is None and l is None else "reference" if r is None else "local")
+        elif r == l:
+            res = "same"
+        else:
+            res = f"DIFFERENT ({what})"
+            changed.add(reg.split()[0])
+        print(f"{name:15} {reg:38} {res}")
+    rr = re.search(r"roothash=([0-9a-fA-F]{64})", ref_cmd or "")
+    lr = re.search(r"roothash=([0-9a-fA-F]{64})", loc_cmd or "")
+    if rr and lr:
+        print(f"roothash        reference {rr.group(1)}")
+        print(f"                local     {lr.group(1)}  {'same' if rr.group(1) == lr.group(1) else 'DIFFERENT'}")
+        if ref_full and loc_full and rr.group(1) != lr.group(1):
+            norm = lambda s: re.sub(r"roothash=[0-9a-fA-F]{64}", "roothash=X", s.strip())  # noqa: E731
+            if norm(ref_cmd) == norm(loc_cmd):
+                print("                the command lines differ only in roothash: image.img is not byte-identical")
+    print()
+    if not changed:
+        print("All image files match: the same image hash is expected for the same VM shape (RTMR0 also")
+        print("depends on vCPU count, memory size and attached devices). Compare TEE_IMAGE_HASH directly with 'check'.")
+    else:
+        print("Registers that will differ: " + ", ".join(sorted(changed)) + ". The TEE_IMAGE_HASH will differ from the")
+        print("reference image, so the root contract must allow your hash, or you must reproduce the reference files.")
+    return 1 if changed else 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip(),
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--root", default=MAINNET_ROOT, help="root contract address (default: mainnet root)")
+    ap.add_argument("--testnet", action="store_true", help="use TON testnet endpoints")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    c = sub.add_parser("check", help="is this TEE_IMAGE_HASH allowed by the root contract")
+    c.add_argument("hashes", nargs="+")
+    sub.add_parser("allowed", help="history of allowed image hashes")
+    d = sub.add_parser("diff", help="compare two image directories or SHA256SUMS files")
+    d.add_argument("reference")
+    d.add_argument("local")
+    a = ap.parse_args(argv)
+    try:
+        return {"check": cmd_check, "allowed": cmd_allowed, "diff": cmd_diff}[a.cmd](a)
+    except (urllib.error.URLError, RuntimeError, ValueError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
